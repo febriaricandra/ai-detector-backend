@@ -9,7 +9,10 @@ const fs = require('fs');
 
 const upload = multer({ 
     dest: 'uploads/',
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    limits: { 
+        fileSize: 50 * 1024 * 1024, // Increase to 50MB
+        files: 1
+    },
     fileFilter: (req, file, cb) => {
         if (file.mimetype === 'application/pdf') {
             cb(null, true);
@@ -18,6 +21,7 @@ const upload = multer({
         }
     }
 });
+
 
 exports.createAnalysisResult = async (req, res) => {
     const { data } = req.body;
