@@ -59,7 +59,7 @@ Berikan analisis dalam bahasa Indonesia yang mudah dipahami.
     console.log('Text length:', text.length);
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Fixed model name
+      model: "gpt-4.1", // Fixed model name
       messages: [
         {
           role: "system",
