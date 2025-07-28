@@ -5,10 +5,11 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GPT_MAX_RETRIES = parseInt(process.env.GPT_MAX_RETRIES) || 2;
 const GPT_TIMEOUT_DURATION = parseInt(process.env.GPT_TIMEOUT_DURATION) || 25000;
 const GPT_CACHE_TTL = parseInt(process.env.GPT_CACHE_TTL) || 60 * 60 * 1000; // 1 hour
-const GPT_MODEL = process.env.GPT_MODEL || 'gpt-4';
+const GPT_MODEL = process.env.GPT_MODEL || 'gpt-4o-mini';
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
+  timeout: 30000 // Set timeout at client level
 });
 
 // Simple in-memory cache for small scale applications (50-100 users)
@@ -163,8 +164,8 @@ Berikan analisis dalam bahasa Indonesia yang mudah dipahami.
               }
             ],
             temperature: 0.3,
-            max_tokens: 2000,
-            timeout: 30000 // OpenAI SDK timeout
+            max_tokens: 2000
+            // Remove timeout parameter - it's not supported in the API call
           }),
           timeoutPromise
         ]);
