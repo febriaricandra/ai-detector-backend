@@ -69,6 +69,13 @@ const generateFallbackAnalysis = () => {
 
 exports.analyzeTextWithGPT = async (text, prediction, confidence, maxRetries = GPT_MAX_RETRIES) => {
   try {
+    console.log('GPT Analysis - Starting with config:', {
+      model: GPT_MODEL,
+      maxRetries: maxRetries,
+      timeout: GPT_TIMEOUT_DURATION,
+      textLength: text.length
+    });
+
     // Periodic cache cleanup (10% chance on each call)
     if (Math.random() < 0.1) cleanCache();
 
@@ -164,13 +171,18 @@ Berikan analisis dalam bahasa Indonesia yang mudah dipahami.
 
         const analysis = completion.choices[0].message.content;
         
+        // Validate the response
+        if (!analysis || analysis.trim().length === 0) {
+          throw new Error('Empty response from GPT');
+        }
+        
         // Cache successful result
         analysisCache.set(cacheKey, {
           data: analysis,
           timestamp: Date.now()
         });
 
-        console.log(`GPT Analysis - Success on attempt ${attempt}`);
+        console.log(`GPT Analysis - Success on attempt ${attempt}, response length: ${analysis.length}`);
         return { analysis };
 
       } catch (err) {
@@ -192,11 +204,8 @@ Berikan analisis dalam bahasa Indonesia yang mudah dipahami.
     console.error('GPT Analysis Error - All attempts failed:', err.message);
     console.error('Full error details:', err);
     
-    // Return fallback analysis to maintain user experience
-    const fallbackAnalysis = generateFallbackAnalysis();
-    console.log('GPT Analysis - Returning fallback response');
-    
-    return { analysis: fallbackAnalysis };
+    // Don't return fallback automatically - let controller handle the error
+    throw new Error(`GPT Analysis failed: ${err.message}`);
   }
 };
 

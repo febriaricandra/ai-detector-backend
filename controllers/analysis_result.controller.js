@@ -44,47 +44,83 @@ exports.createAnalysisResult = async (req, res) => {
 
         // Analisis GPT dengan timeout handling
         console.log('Starting GPT analysis for userId:', req.user.id);
-        const gpt_analysis = await analyzeTextWithGPT(
-            data,
-            response.data.prediction,
-            response.data.confidence
-        );
-
-        console.log('GPT analysis completed for userId:', req.user.id);
+        let gpt_analysis;
+        let analysisStatus = 'success';
+        
+        try {
+            gpt_analysis = await analyzeTextWithGPT(
+                data,
+                response.data.prediction,
+                response.data.confidence
+            );
+            console.log('GPT analysis completed successfully for userId:', req.user.id);
+        } catch (gptError) {
+            console.warn('GPT analysis failed, using fallback for userId:', req.user.id, gptError.message);
+            analysisStatus = 'fallback';
+            
+            // Generate fallback analysis
+            gpt_analysis = {
+                analysis: JSON.stringify({
+                    linguistic_indicators: [{
+                        pattern: "analisis_tidak_tersedia",
+                        description: "Sistem GPT sementara tidak tersedia",
+                        ai_likelihood: "tidak_diketahui",
+                        examples: []
+                    }],
+                    vocabulary_analysis: {
+                        complexity: "tidak dapat dianalisis",
+                        technical_terms: [],
+                        repetitive_phrases: [],
+                        sentence_structure: "analisis tidak tersedia saat ini"
+                    },
+                    writing_style: {
+                        formality: "tidak diketahui",
+                        flow: "tidak diketahui",
+                        coherence: "tidak diketahui",
+                        human_markers: [],
+                        ai_markers: []
+                    },
+                    conclusion: {
+                        primary_reason: "Analisis GPT sementara tidak tersedia",
+                        confidence_explanation: "Sistem sedang mengalami gangguan teknis",
+                        recommendation: "Analisis dasar berdasarkan prediksi Flask saja"
+                    }
+                })
+            };
+        }
 
         // Simpan hasil analisis
         const analysisResult = await AnalysisResult.create({
             text: data,
             flask_prediction: response.data.prediction,
             flask_confidence: response.data.confidence,
-            gemini_analysis: gpt_analysis,
+            gemini_analysis: gpt_analysis, // Keep field name for backward compatibility
             userId: req.user.id
         });
         
         res.status(201).json({
             ...analysisResult.toJSON(),
-            message: 'Analysis completed successfully'
+            message: `Analysis completed ${analysisStatus === 'fallback' ? 'with fallback GPT analysis' : 'successfully'}`,
+            gpt_status: analysisStatus
         });
     } catch (err) {
         console.error('Analysis Error:', err.message);
         
-        // Provide more specific error messages
-        if (err.message.includes('timeout')) {
-            res.status(408).json({ 
-                message: 'Analysis timeout - please try again',
-                error: 'TIMEOUT_ERROR'
-            });
-        } else if (err.message.includes('OpenAI')) {
-            res.status(503).json({ 
-                message: 'AI analysis service temporarily unavailable',
-                error: 'AI_SERVICE_ERROR'
-            });
-        } else {
-            res.status(500).json({ 
-                message: 'Internal server error',
-                error: 'INTERNAL_ERROR'
+        // If Flask API failed, we can't continue
+        if (err.response && err.response.status) {
+            return res.status(502).json({ 
+                message: 'Flask API service unavailable',
+                error: 'FLASK_API_ERROR',
+                details: err.response.data || err.message
             });
         }
+        
+        // For other errors (database, etc.)
+        res.status(500).json({ 
+            message: 'Analysis failed',
+            error: 'INTERNAL_ERROR',
+            details: err.message
+        });
     }
 };
 
@@ -145,26 +181,64 @@ exports.analyzeTextPDF = async (req, res) => {
 
         // Analisis GPT dengan teks yang sudah diekstrak
         console.log('Starting GPT analysis for PDF for userId:', req.user.id);
-        const gpt_analysis = await analyzeTextWithGPT(
-            extractedText,
-            predictionResponse.data.prediction,
-            predictionResponse.data.confidence
-        );
-
-        console.log('GPT analysis completed for PDF for userId:', req.user.id);
+        let gpt_analysis;
+        let analysisStatus = 'success';
+        
+        try {
+            gpt_analysis = await analyzeTextWithGPT(
+                extractedText,
+                predictionResponse.data.prediction,
+                predictionResponse.data.confidence
+            );
+            console.log('GPT analysis completed successfully for PDF for userId:', req.user.id);
+        } catch (gptError) {
+            console.warn('GPT analysis failed for PDF, using fallback for userId:', req.user.id, gptError.message);
+            analysisStatus = 'fallback';
+            
+            // Generate fallback analysis
+            gpt_analysis = {
+                analysis: JSON.stringify({
+                    linguistic_indicators: [{
+                        pattern: "analisis_tidak_tersedia",
+                        description: "Sistem GPT sementara tidak tersedia",
+                        ai_likelihood: "tidak_diketahui",
+                        examples: []
+                    }],
+                    vocabulary_analysis: {
+                        complexity: "tidak dapat dianalisis",
+                        technical_terms: [],
+                        repetitive_phrases: [],
+                        sentence_structure: "analisis tidak tersedia saat ini"
+                    },
+                    writing_style: {
+                        formality: "tidak diketahui",
+                        flow: "tidak diketahui",
+                        coherence: "tidak diketahui",
+                        human_markers: [],
+                        ai_markers: []
+                    },
+                    conclusion: {
+                        primary_reason: "Analisis GPT sementara tidak tersedia",
+                        confidence_explanation: "Sistem sedang mengalami gangguan teknis",
+                        recommendation: "Analisis dasar berdasarkan prediksi Flask saja"
+                    }
+                })
+            };
+        }
 
         // Simpan hasil analisis
         const analysisResult = await AnalysisResult.create({
             text: extractedText,
             flask_prediction: predictionResponse.data.prediction,
             flask_confidence: predictionResponse.data.confidence,
-            gemini_analysis: gpt_analysis,
+            gemini_analysis: gpt_analysis, // Keep field name for backward compatibility
             userId: req.user.id
         });
         
         res.status(201).json({
             ...analysisResult.toJSON(),
-            message: 'PDF analysis completed successfully'
+            message: `PDF analysis completed ${analysisStatus === 'fallback' ? 'with fallback GPT analysis' : 'successfully'}`,
+            gpt_status: analysisStatus
         });
     } catch (err) {
         console.error('PDF Analysis Error:', err.response?.data || err.message);
@@ -179,25 +253,22 @@ exports.analyzeTextPDF = async (req, res) => {
         }
         
         // Provide more specific error messages
-        if (err.message.includes('timeout')) {
-            res.status(408).json({ 
-                message: 'PDF analysis timeout - please try again',
-                error: 'TIMEOUT_ERROR'
-            });
-        } else if (err.message.includes('OpenAI')) {
-            res.status(503).json({ 
-                message: 'AI analysis service temporarily unavailable',
-                error: 'AI_SERVICE_ERROR'
-            });
-        } else if (err.response?.status === 413) {
+        if (err.response?.status === 413 || err.message.includes('file too large')) {
             res.status(413).json({ 
-                message: 'PDF file too large',
+                message: 'PDF file too large (max 50MB)',
                 error: 'FILE_TOO_LARGE'
+            });
+        } else if (err.response && err.response.status) {
+            res.status(502).json({ 
+                message: 'Flask API service unavailable for PDF processing',
+                error: 'FLASK_PDF_ERROR',
+                details: err.response.data || err.message
             });
         } else {
             res.status(500).json({ 
                 message: 'PDF analysis failed',
-                error: 'INTERNAL_ERROR'
+                error: 'INTERNAL_ERROR',
+                details: err.message
             });
         }
     }
