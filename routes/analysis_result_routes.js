@@ -9,4 +9,8 @@ router.get('/', AnalysisResultController.getAnalysisResults);
 router.get('/:id', AnalysisResultController.getAnalysisResultById);
 router.post('/analyze-text-pdf',AnalysisResultController.uploadPDF, AnalysisResultController.analyzeTextPDF);
 
+// Monitoring endpoints
+router.get('/health/gpt', AnalysisResultController.getGPTHealthCheck);
+router.post('/cache/clear', AnalysisResultController.clearGPTCache);
+
 module.exports = router;

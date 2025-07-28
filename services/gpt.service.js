@@ -1,12 +1,88 @@
 const OpenAI = require('openai');
+const crypto = require('crypto');
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GPT_MAX_RETRIES = parseInt(process.env.GPT_MAX_RETRIES) || 2;
+const GPT_TIMEOUT_DURATION = parseInt(process.env.GPT_TIMEOUT_DURATION) || 25000;
+const GPT_CACHE_TTL = parseInt(process.env.GPT_CACHE_TTL) || 60 * 60 * 1000; // 1 hour
+const GPT_MODEL = process.env.GPT_MODEL || 'gpt-4';
+
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
-exports.analyzeTextWithGPT = async (text, prediction, confidence) => {
+// Simple in-memory cache for small scale applications (50-100 users)
+const analysisCache = new Map();
+const CACHE_TTL = GPT_CACHE_TTL;
+
+// Generate cache key based on text sample and parameters
+const generateCacheKey = (text, prediction, confidence) => {
+  const textSample = text.slice(0, 500); // First 500 characters
+  const hash = crypto.createHash('sha256')
+    .update(`${textSample}:${prediction}:${confidence.ai.toFixed(2)}:${confidence.human.toFixed(2)}`)
+    .digest('hex');
+  return hash;
+};
+
+// Clean expired cache entries
+const cleanCache = () => {
+  const now = Date.now();
+  for (const [key, value] of analysisCache.entries()) {
+    if (now - value.timestamp > CACHE_TTL) {
+      analysisCache.delete(key);
+    }
+  }
+};
+
+// Sleep function for retry mechanism
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Generate fallback analysis for error cases
+const generateFallbackAnalysis = () => {
+  return JSON.stringify({
+    linguistic_indicators: [{
+      pattern: "analisis_tidak_tersedia",
+      description: "Sistem sedang mengalami gangguan teknis",
+      ai_likelihood: "tidak_diketahui",
+      examples: []
+    }],
+    vocabulary_analysis: {
+      complexity: "tidak dapat dianalisis",
+      technical_terms: [],
+      repetitive_phrases: [],
+      sentence_structure: "analisis tidak tersedia saat ini"
+    },
+    writing_style: {
+      formality: "tidak diketahui",
+      flow: "tidak diketahui",
+      coherence: "tidak diketahui",
+      human_markers: [],
+      ai_markers: []
+    },
+    conclusion: {
+      primary_reason: "Analisis sementara tidak tersedia",
+      confidence_explanation: "Sistem sedang mengalami gangguan teknis, silakan coba lagi dalam beberapa menit",
+      recommendation: "Ulangi analisis dalam beberapa saat atau hubungi administrator jika masalah berlanjut"
+    }
+  });
+};
+
+exports.analyzeTextWithGPT = async (text, prediction, confidence, maxRetries = GPT_MAX_RETRIES) => {
   try {
+    // Periodic cache cleanup (10% chance on each call)
+    if (Math.random() < 0.1) cleanCache();
+
+    // Check cache first
+    const cacheKey = generateCacheKey(text, prediction, confidence);
+    const cachedResult = analysisCache.get(cacheKey);
+    
+    if (cachedResult && (Date.now() - cachedResult.timestamp < CACHE_TTL)) {
+      console.log('GPT Analysis - Cache hit, returning cached result');
+      return { analysis: cachedResult.data };
+    }
+
+    console.log('GPT Analysis - Cache miss, calling OpenAI API');
+
     const prompt = `
 Analisis pola linguistik dari teks berikut dan berikan reasoning mengapa teks ini diprediksi sebagai "${prediction}" dengan confidence AI: ${confidence.ai.toFixed(3)} dan Human: ${confidence.human.toFixed(3)}.
 
@@ -53,34 +129,89 @@ Fokus pada:
 Berikan analisis dalam bahasa Indonesia yang mudah dipahami.
 `;
 
-    // Debug log
-    console.log('GPT Analysis - Starting analysis...');
-    console.log('Model:', 'gpt-4o-mini');
-    console.log('Text length:', text.length);
+    // Retry logic with exponential backoff
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`GPT Analysis attempt ${attempt}/${maxRetries}`);
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1", // Fixed model name
-      messages: [
-        {
-          role: "system",
-          content: "Kamu adalah ahli linguistik yang dapat menganalisis pola penulisan untuk mendeteksi apakah teks ditulis oleh AI atau manusia. Berikan analisis yang detail dan objektif."
-        },
-        {
-          role: "user",
-          content: prompt
+        // Create timeout promise
+        const timeoutDuration = GPT_TIMEOUT_DURATION + (attempt * 5000); // Increase timeout per attempt
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Request timeout - GPT analysis took too long')), timeoutDuration);
+        });
+
+        // Race between API call and timeout
+        const completion = await Promise.race([
+          openai.chat.completions.create({
+            model: GPT_MODEL, // Use configured model
+            messages: [
+              {
+                role: "system",
+                content: "Kamu adalah ahli linguistik yang dapat menganalisis pola penulisan untuk mendeteksi apakah teks ditulis oleh AI atau manusia. Berikan analisis yang detail dan objektif."
+              },
+              {
+                role: "user",
+                content: prompt
+              }
+            ],
+            temperature: 0.3,
+            max_tokens: 2000,
+            timeout: 30000 // OpenAI SDK timeout
+          }),
+          timeoutPromise
+        ]);
+
+        const analysis = completion.choices[0].message.content;
+        
+        // Cache successful result
+        analysisCache.set(cacheKey, {
+          data: analysis,
+          timestamp: Date.now()
+        });
+
+        console.log(`GPT Analysis - Success on attempt ${attempt}`);
+        return { analysis };
+
+      } catch (err) {
+        lastError = err;
+        console.error(`GPT Analysis attempt ${attempt} failed:`, err.message);
+        
+        if (attempt < maxRetries) {
+          const delay = 2000 * attempt; // Linear backoff: 2s, 4s
+          console.log(`Retrying GPT analysis in ${delay}ms...`);
+          await sleep(delay);
         }
-      ],
-      temperature: 0.3,
-      max_tokens: 2000
-    });
+      }
+    }
 
-    const analysis = completion.choices[0].message.content;
-    console.log('GPT Analysis - Success:', analysis ? 'Content received' : 'No content');
-    
-    return { analysis };
+    // All retries failed, throw the last error
+    throw lastError;
+
   } catch (err) {
-    console.error('GPT Analysis Error:', err.message);
-    console.error('Full error:', err);
-    throw new Error('OpenAI analysis failed: ' + err.message);
+    console.error('GPT Analysis Error - All attempts failed:', err.message);
+    console.error('Full error details:', err);
+    
+    // Return fallback analysis to maintain user experience
+    const fallbackAnalysis = generateFallbackAnalysis();
+    console.log('GPT Analysis - Returning fallback response');
+    
+    return { analysis: fallbackAnalysis };
   }
+};
+
+// Optional: Export cache statistics for monitoring
+exports.getCacheStats = () => {
+  cleanCache();
+  return {
+    size: analysisCache.size,
+    memoryUsage: (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2) + ' MB',
+    hitRate: 'Use logging to track hit rate'
+  };
+};
+
+// Optional: Clear cache manually (useful for testing or admin purposes)
+exports.clearCache = () => {
+  analysisCache.clear();
+  console.log('GPT Analysis cache cleared');
 };

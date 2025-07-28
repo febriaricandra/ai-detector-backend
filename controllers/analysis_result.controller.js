@@ -1,7 +1,7 @@
 const AnalysisResult = require('../models/analysis_result.model');
 const appSetting = require('../models/app_setting.model');
 const { analyzeTextWithGemini } = require('../services/gemini.service');
-const { analyzeTextWithGPT } = require('../services/gpt.service');
+const { analyzeTextWithGPT, getCacheStats, clearCache } = require('../services/gpt.service');
 const axios = require('axios');
 const multer = require('multer');
 const fs = require('fs');
@@ -42,14 +42,15 @@ exports.createAnalysisResult = async (req, res) => {
         //     response.data.confidence
         // );
 
-        // Analisis GPT
+        // Analisis GPT dengan timeout handling
+        console.log('Starting GPT analysis for userId:', req.user.id);
         const gpt_analysis = await analyzeTextWithGPT(
             data,
             response.data.prediction,
             response.data.confidence
         );
 
-        console.log('userId', req.user.id);
+        console.log('GPT analysis completed for userId:', req.user.id);
 
         // Simpan hasil analisis
         const analysisResult = await AnalysisResult.create({
@@ -59,9 +60,31 @@ exports.createAnalysisResult = async (req, res) => {
             gemini_analysis: gpt_analysis,
             userId: req.user.id
         });
-        res.status(201).json(analysisResult);
+        
+        res.status(201).json({
+            ...analysisResult.toJSON(),
+            message: 'Analysis completed successfully'
+        });
     } catch (err) {
-        res.status(500).json({ message: err.message });
+        console.error('Analysis Error:', err.message);
+        
+        // Provide more specific error messages
+        if (err.message.includes('timeout')) {
+            res.status(408).json({ 
+                message: 'Analysis timeout - please try again',
+                error: 'TIMEOUT_ERROR'
+            });
+        } else if (err.message.includes('OpenAI')) {
+            res.status(503).json({ 
+                message: 'AI analysis service temporarily unavailable',
+                error: 'AI_SERVICE_ERROR'
+            });
+        } else {
+            res.status(500).json({ 
+                message: 'Internal server error',
+                error: 'INTERNAL_ERROR'
+            });
+        }
     }
 };
 
@@ -121,13 +144,14 @@ exports.analyzeTextPDF = async (req, res) => {
         });
 
         // Analisis GPT dengan teks yang sudah diekstrak
+        console.log('Starting GPT analysis for PDF for userId:', req.user.id);
         const gpt_analysis = await analyzeTextWithGPT(
             extractedText,
             predictionResponse.data.prediction,
             predictionResponse.data.confidence
         );
 
-        console.log('userId', req.user.id);
+        console.log('GPT analysis completed for PDF for userId:', req.user.id);
 
         // Simpan hasil analisis
         const analysisResult = await AnalysisResult.create({
@@ -138,9 +162,12 @@ exports.analyzeTextPDF = async (req, res) => {
             userId: req.user.id
         });
         
-        res.status(201).json(analysisResult);
+        res.status(201).json({
+            ...analysisResult.toJSON(),
+            message: 'PDF analysis completed successfully'
+        });
     } catch (err) {
-        console.error('Error details:', err.response?.data || err.message);
+        console.error('PDF Analysis Error:', err.response?.data || err.message);
         
         // Cleanup file jika terjadi error dan file masih ada
         if (file && file.path && fs.existsSync(file.path)) {
@@ -150,7 +177,29 @@ exports.analyzeTextPDF = async (req, res) => {
                 console.error('Failed to delete temp file:', unlinkErr);
             }
         }
-        res.status(500).json({ message: err.message });
+        
+        // Provide more specific error messages
+        if (err.message.includes('timeout')) {
+            res.status(408).json({ 
+                message: 'PDF analysis timeout - please try again',
+                error: 'TIMEOUT_ERROR'
+            });
+        } else if (err.message.includes('OpenAI')) {
+            res.status(503).json({ 
+                message: 'AI analysis service temporarily unavailable',
+                error: 'AI_SERVICE_ERROR'
+            });
+        } else if (err.response?.status === 413) {
+            res.status(413).json({ 
+                message: 'PDF file too large',
+                error: 'FILE_TOO_LARGE'
+            });
+        } else {
+            res.status(500).json({ 
+                message: 'PDF analysis failed',
+                error: 'INTERNAL_ERROR'
+            });
+        }
     }
 };
 
@@ -177,6 +226,42 @@ exports.getAnalysisResultById = async (req, res) => {
         res.json(analysisResult);
     } catch (err) {
         res.status(400).json({ message: err.message });
+    }
+}
+
+// Health check endpoint untuk monitoring GPT service
+exports.getGPTHealthCheck = async (req, res) => {
+    try {
+        const cacheStats = getCacheStats();
+        const healthInfo = {
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            cache: cacheStats,
+            uptime: process.uptime() + ' seconds'
+        };
+        res.json(healthInfo);
+    } catch (err) {
+        res.status(500).json({ 
+            status: 'unhealthy',
+            error: err.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+}
+
+// Clear cache endpoint untuk admin
+exports.clearGPTCache = async (req, res) => {
+    try {
+        clearCache();
+        res.json({ 
+            message: 'GPT cache cleared successfully',
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        res.status(500).json({ 
+            message: 'Failed to clear cache',
+            error: err.message
+        });
     }
 }
 
