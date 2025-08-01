@@ -7,6 +7,7 @@ router.use(authMiddleware);
 router.post('/', AnalysisResultController.createAnalysisResult);
 router.get('/', AnalysisResultController.getAnalysisResults);
 router.get('/:id', AnalysisResultController.getAnalysisResultById);
+router.delete('/:id', AnalysisResultController.deleteAnalysisResult);
 router.post('/analyze-text-pdf',AnalysisResultController.uploadPDF, AnalysisResultController.analyzeTextPDF);
 
 // Monitoring endpoints

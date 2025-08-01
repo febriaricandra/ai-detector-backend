@@ -300,6 +300,27 @@ exports.getAnalysisResultById = async (req, res) => {
     }
 }
 
+exports.deleteAnalysisResult = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const analysisResult = await AnalysisResult.findOne({
+            where: { id, userId: req.user.id }
+        });
+        
+        if (!analysisResult) {
+            return res.status(404).json({ message: 'Analysis result not found' });
+        }
+        
+        await analysisResult.destroy();
+        res.json({ 
+            message: 'Analysis result deleted successfully',
+            deletedId: id
+        });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+}
+
 // Health check endpoint untuk monitoring GPT service
 exports.getGPTHealthCheck = async (req, res) => {
     try {
